@@ -57,7 +57,7 @@
 
     const tooltip = d3.select("#tooltip");
 
-    // 1. Configuração das URLs das duas APIs oficiais do IBGE
+    // 1. Configuração das URLs das duas APIs oficiais do IBGE (Garantindo HTTPS seguro)
     const urlMapaIbge = "https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR?qualidade=maxima&intregra=estados&formato=application/vnd.geo+json";
     const urlDadosIbge = "https://servicodados.ibge.gov.br/api/v3/agregados/9514/periodos/2022/variaveis/93?localidades=N3[all]";
 
@@ -69,21 +69,20 @@
 
     const pathGenerator = d3.geoPath().projection(projection);
 
-    // 3. ENGENHARIA DE DADOS NA AULA: Carregar as duas APIs ao mesmo tempo usando Promise.all
+    // 3. Carregar as duas APIs em paralelo usando Promise.all
     Promise.all([
         d3.json(urlMapaIbge),
         d3.json(urlDadosIbge)
     ]).then(([geojsonData, estatisticasIbge]) => {
 
-        // 4. Tratamento dos dados brutos do IBGE para um formato fácil de ler (Dicionário JavaScript)
-        // A API do SIDRA traz uma estrutura de array aninhada profunda. Vamos limpá-la:
+        // 4. Tratamento dos dados estatísticos vindos da API do SIDRA
         const populacaoPorEstado = {};
         const resultadosBrutos = estatisticasIbge[0].resultados[0].series;
 
         resultadosBrutos.forEach(item => {
-            const codigoEstado = item.localidade.id;
+            const codigoEstado = String(item.localidade.id).trim();
             const nomeEstado = item.localidade.nome;
-            const populacao = parseInt(item.serie["2022"]); // Pega o valor do Censo 2022
+            const populacao = parseInt(item.serie["2022"]);
             
             populacaoPorEstado[codigoEstado] = {
                 nome: nomeEstado,
@@ -91,17 +90,16 @@
             };
         });
 
-        // 5. Criação de uma Escala de Cores Dinâmica (Choropleth) baseada nos extremos reais
-        // Descobre automaticamente qual o estado menos populoso e o mais populoso para criar o gradiente
-        const valoresPopulação = Object.values(populacaoPorEstado).map(d => d.populacao);
-        const minPop = d3.min(valoresPopulação);
-        const maxPop = d3.max(valoresPopulação);
+        // 5. Criação da Escala de Cores Dinâmica (Choropleth)
+        const valoresPopulacao = Object.values(populacaoPorEstado).map(d => d.populacao);
+        const minPop = d3.min(valoresPopulacao);
+        const maxPop = d3.max(valoresPopulacao);
 
         const colorScale = d3.scaleSequential()
             .domain([minPop, maxPop])
-            .interpolator(d3.interpolateBlues); // Tons de azul (quanto mais escuro, mais populoso)
+            .interpolator(d3.interpolateBlues);
 
-        // 6. Desenhar os caminhos geométricos no SVG
+        // 6. Desenhar os caminhos geométricos no SVG com a correção de chaves (id / codarea / CODAREA)
         svg.append("g")
             .selectAll("path")
             .data(geojsonData.features)
@@ -110,21 +108,27 @@
             .attr("d", pathGenerator)
             .attr("class", "estado")
             .attr("fill", d => {
-                const codigoEstado = d.properties.codarea; 
-                const dadosEstaduias = populacaoPorEstado[codigoEstado];
-                return dadosEstaduias ? colorScale(dadosEstaduias.populacao) : "#444";
+                // Captura inteligente do código numérico enviado pelo IBGE
+                const codigoEstado = d.id || (d.properties && (d.properties.codarea || d.properties.CODAREA));
+                const chaveTratada = String(codigoEstado).trim();
+                const dadosEstaduais = populacaoPorEstado[chaveTratada];
+                return dadosEstaduais ? colorScale(dadosEstaduais.populacao) : "#444";
             })
-            // 7. Eventos de Interatividade do Tooltip
+            // 7. Eventos de Interatividade do Tooltip com chaves normalizadas
             .on("mouseover", (event, d) => {
-                const codigoEstado = d.properties.codarea;
-                const dadosEstaduias = populacaoPorEstado[codigoEstado];
+                const codigoEstado = d.id || (d.properties && (d.properties.codarea || d.properties.CODAREA));
+                const chaveTratada = String(codigoEstado).trim();
+                const dadosEstaduais = populacaoPorEstado[chaveTratada];
                 
-                const nome = dadosEstaduias ? dadosEstaduias.nome : "Desconhecido";
-                // Formata o número com separador de milhar brasileiro (ex: 44.420.459)
-                const populacaoFormatada = dadosEstaduias ? dadosEstaduias.populacao.toLocaleString('pt-BR') : "Sem dados";
+                let conteudoTooltip = "";
+                if (dadosEstaduais) {
+                    const populacaoFormatada = dadosEstaduais.populacao.toLocaleString('pt-BR');
+                    conteudoTooltip = `<strong>${dadosEstaduais.nome}</strong><br/>População: ${populacaoFormatada} hab.`;
+                } else {
+                    conteudoTooltip = `<strong>Código: ${codigoEstado || 'Indefinido'}</strong><br/>Sem dados correspondentes.`;
+                }
 
-                tooltip.style("opacity", 1)
-                       .html(`<strong>${nome}</strong><br/>População: ${populacaoFormatada} hab.`);
+                tooltip.style("opacity", 1).html(conteudoTooltip);
             })
             .on("mousemove", (event) => {
                 const [mouseX, mouseY] = d3.pointer(event, svg.node());
