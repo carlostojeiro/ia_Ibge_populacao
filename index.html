@@ -1,51 +1,3 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aula Final: Automação Total com APIs do IBGE</title>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #121214;
-            color: #e1e1e6;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            margin: 0;
-            padding: 20px;
-        }
-        h1 { margin-bottom: 5px; color: #00b37e; }
-        p { margin-top: 0; color: #8d8d99; }
-        #map-container { position: relative; background: #1c1c1f; border-radius: 8px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-        .estado { stroke: #121214; stroke-width: 1.2; cursor: pointer; transition: all 0.2s ease; }
-        .estado:hover { stroke: #fff; stroke-width: 2px; filter: brightness(1.2); }
-        .tooltip {
-            position: absolute;
-            background: rgba(32, 32, 36, 0.95);
-            border: 1px solid #00b37e;
-            padding: 10px;
-            border-radius: 4px;
-            color: #fff;
-            font-size: 14px;
-            pointer-events: none;
-            opacity: 0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            transition: opacity 0.15s ease;
-        }
-    </style>
-</head>
-<body>
-
-    <h1>População Dinâmica do Brasil (APIs IBGE)</h1>
-    <p>Aplicação 100% automatizada. Dados e geografia sincronizados em tempo real.</p>
-
-    <div id="map-container">
-        <div class="tooltip" id="tooltip"></div>
-    </div>
-
 <script>
     const width = 700;
     const height = 650;
@@ -57,7 +9,16 @@
 
     const tooltip = d3.select("#tooltip");
 
-    // 1. ENDPOINTS: Mapa fatiado por estados + Dados dinâmicos do Censo do Governo
+    // Dicionário de conversão de Código IBGE para Sigla (Garante consistência na filtragem)
+    const ibgeParaSigla = {
+        "11": "RO", "12": "AC", "13": "AM", "14": "RR", "15": "PA", "16": "AP", "17": "TO",
+        "21": "MA", "22": "PI", "23": "CE", "24": "RN", "25": "PB", "26": "PE", "27": "AL", "28": "SE", "29": "BA",
+        "31": "MG", "32": "ES", "33": "RJ", "35": "SP",
+        "41": "PR", "42": "SC", "43": "RS",
+        "50": "MS", "51": "MT", "52": "GO", "53": "DF"
+    };
+
+    // Endpoints estáveis
     const urlMapa = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson";
     const urlDados = "https://servicodados.ibge.gov.br/api/v3/agregados/9514/periodos/2022/variaveis/93?localidades=N3[all]";
 
@@ -68,31 +29,34 @@
 
     const pathGenerator = d3.geoPath().projection(projection);
 
-    // 2. Requisição Paralela Real
     Promise.all([
         d3.json(urlMapa),
         d3.json(urlDados)
     ]).then(([geojsonData, estatisticasIbge]) => {
 
-        // 3. Mapeando os dados da API dinâmica usando o ID do estado (ex: "35" para SP)
-        const populacaoPorCodigo = {};
+        const populacaoPorSigla = {};
         const resultadosBrutos = estatisticasIbge[0].resultados[0].series;
 
+        // 1. Processa a API do IBGE convertendo os códigos numéricos diretamente para as Siglas universais
         resultadosBrutos.forEach(item => {
-            const codigoEstado = String(item.localidade.id).trim();
-            populacaoPorCodigo[codigoEstado] = {
-                nome: item.localidade.nome,
-                populacao: parseInt(item.serie["2022"])
-            };
+            const codigoNum = String(item.localidade.id).trim();
+            const siglaCorrespondente = ibgeParaSigla[codigoNum];
+            
+            if (siglaCorrespondente) {
+                populacaoPorSigla[siglaCorrespondente] = {
+                    nome: item.localidade.nome,
+                    populacao: parseInt(item.serie["2022"])
+                };
+            }
         });
 
-        // 4. Criação automática dos limites da escala de cor
-        const valores = Object.values(populacaoPorCodigo).map(d => d.populacao);
+        // 2. Define os extremos reais para o gradiente automático
+        const valores = Object.values(populacaoPorSigla).map(d => d.populacao);
         const colorScale = d3.scaleSequential()
             .domain([d3.min(valores), d3.max(valores)])
             .interpolator(d3.interpolateBlues);
 
-        // 5. Renderização do mapa cruzando chaves numéricas do IBGE
+        // 3. Renderiza cruzando estritamente pelas Siglas ('SP', 'AM', 'BA')
         svg.append("g")
             .selectAll("path")
             .data(geojsonData.features)
@@ -101,19 +65,18 @@
             .attr("d", pathGenerator)
             .attr("class", "estado")
             .attr("fill", d => {
-                // Esse arquivo de mapa guarda o código numérico em d.properties.id (ex: 35)
-                const codigoGeografico = String(d.properties.id).trim();
-                const dados = populacaoPorCodigo[codigoGeografico];
+                const siglaDoMapa = d.properties.sigla; // Lê "AM", "SP", "BA" diretamente do polígono
+                const dados = populacaoPorSigla[siglaDoMapa];
                 return dados ? colorScale(dados.populacao) : "#444";
             })
             .on("mouseover", (event, d) => {
-                const codigoGeografico = String(d.properties.id).trim();
-                const sigla = d.properties.sigla; // Pega a sigla "SP" para o layout
-                const dados = populacaoPorCodigo[codigoGeografico];
+                const siglaDoMapa = d.properties.sigla;
+                const dados = populacaoPorSigla[siglaDoMapa];
                 
                 if (dados) {
+                    const populacaoFormatada = dados.populacao.toLocaleString('pt-BR');
                     tooltip.style("opacity", 1)
-                           .html(`<strong>${dados.nome} (${sigla})</strong><br/>População: ${dados.populacao.toLocaleString('pt-BR')} hab.`);
+                           .html(`<strong>${dados.nome} (${siglaDoMapa})</strong><br/>População: ${populacaoFormatada} hab.`);
                 }
             })
             .on("mousemove", (event) => {
@@ -129,5 +92,3 @@
         console.error("Erro na sincronização das APIs:", error);
     });
 </script>
-</body>
-</html>
