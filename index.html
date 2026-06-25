@@ -1,51 +1,3 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aula Avançada D3.js: População Real do Censo IBGE</title>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #121214;
-            color: #e1e1e6;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            margin: 0;
-            padding: 20px;
-        }
-        h1 { margin-bottom: 5px; color: #00b37e; }
-        p { margin-top: 0; color: #8d8d99; }
-        #map-container { position: relative; background: #1c1c1f; border-radius: 8px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-        .estado { stroke: #121214; stroke-width: 1.2; cursor: pointer; transition: all 0.2s ease; }
-        .estado:hover { stroke: #fff; stroke-width: 2px; filter: brightness(1.2); }
-        .tooltip {
-            position: absolute;
-            background: rgba(32, 32, 36, 0.95);
-            border: 1px solid #00b37e;
-            padding: 10px;
-            border-radius: 4px;
-            color: #fff;
-            font-size: 14px;
-            pointer-events: none;
-            opacity: 0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            transition: opacity 0.15s ease;
-        }
-    </style>
-</head>
-<body>
-
-    <h1>População do Brasil por Estado (Censo IBGE)</h1>
-    <p>Dados demográficos e malha geográfica consumidos em tempo real das APIs oficiais do Governo.</p>
-
-    <div id="map-container">
-        <div class="tooltip" id="tooltip"></div>
-    </div>
-
 <script>
     const width = 700;
     const height = 650;
@@ -57,11 +9,41 @@
 
     const tooltip = d3.select("#tooltip");
 
-    // 1. Configuração das URLs das duas APIs oficiais do IBGE (Garantindo HTTPS seguro)
-    const urlMapaIbge = "https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR?qualidade=maxima&intregra=estados&formato=application/vnd.geo+json";
-    const urlDadosIbge = "https://servicodados.ibge.gov.br/api/v3/agregados/9514/periodos/2022/variaveis/93?localidades=N3[all]";
+    // 1. URL CORRIGIDA: Esta traz os estados fatiados perfeitamente em GeoJSON
+    const urlMapaIbge = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson";
 
-    // 2. Projeção cartográfica do mapa
+    // 2. Dados Oficiais do Censo IBGE mapeados pelas SIGLAS correspondentes ao arquivo acima
+    const populacaoPorEstado = {
+        "AC": { nome: "Acre", populacao: 830018 },
+        "AL": { nome: "Alagoas", populacao: 3127682 },
+        "AM": { nome: "Amazonas", populacao: 3941613 },
+        "AP": { nome: "Amapá", populacao: 733759 },
+        "BA": { nome: "Bahia", populacao: 14141626 },
+        "CE": { nome: "Ceará", populacao: 8794957 },
+        "DF": { nome: "Distrito Federal", populacao: 2817381 },
+        "ES": { nome: "Espírito Santo", populacao: 3833712 },
+        "GO": { nome: "Goiás", populacao: 7056495 },
+        "MA": { nome: "Maranhão", populacao: 6776699 },
+        "MG": { nome: "Minas Gerais", populacao: 20539989 },
+        "MS": { nome: "Mato Grosso do Sul", populacao: 2757013 },
+        "MT": { nome: "Mato Grosso", populacao: 3658649 },
+        "PA": { nome: "Pará", populacao: 8121025 },
+        "PB": { nome: "Paraíba", populacao: 3974687 },
+        "PE": { nome: "Pernambuco", populacao: 9058931 },
+        "PI": { nome: "Piauí", populacao: 3272061 },
+        "PR": { nome: "Paraná", populacao: 11444380 },
+        "RJ": { nome: "Rio de Janeiro", populacao: 16055174 },
+        "RN": { nome: "Rio Grande do Norte", populacao: 3302729 },
+        "RO": { nome: "Rondônia", populacao: 1581196 },
+        "RR": { nome: "Roraima", populacao: 636707 },
+        "RS": { nome: "Rio Grande do Sul", populacao: 10882965 },
+        "SC": { nome: "Santa Catarina", populacao: 7610361 },
+        "SE": { nome: "Sergipe", populacao: 2209558 },
+        "SP": { nome: "São Paulo", populacao: 44411238 },
+        "TO": { nome: "Tocantins", populacao: 1511460 }
+    };
+
+    // 3. Projeção cartográfica centralizada
     const projection = d3.geoMercator()
         .center([-55, -15]) 
         .scale(850)         
@@ -69,37 +51,18 @@
 
     const pathGenerator = d3.geoPath().projection(projection);
 
-    // 3. Carregar as duas APIs em paralelo usando Promise.all
-    Promise.all([
-        d3.json(urlMapaIbge),
-        d3.json(urlDadosIbge)
-    ]).then(([geojsonData, estatisticasIbge]) => {
+    // 4. Configuração das escalas de cores baseadas nos extremos reais
+    const valoresPopulacao = Object.values(populacaoPorEstado).map(d => d.populacao);
+    const minPop = d3.min(valoresPopulacao);
+    const maxPop = d3.max(valoresPopulacao);
 
-        // 4. Tratamento dos dados estatísticos vindos da API do SIDRA
-        const populacaoPorEstado = {};
-        const resultadosBrutos = estatisticasIbge[0].resultados[0].series;
+    const colorScale = d3.scaleSequential()
+        .domain([minPop, maxPop])
+        .interpolator(d3.interpolateBlues);
 
-        resultadosBrutos.forEach(item => {
-            const codigoEstado = String(item.localidade.id).trim();
-            const nomeEstado = item.localidade.nome;
-            const populacao = parseInt(item.serie["2022"]);
-            
-            populacaoPorEstado[codigoEstado] = {
-                nome: nomeEstado,
-                populacao: populacao
-            };
-        });
-
-        // 5. Criação da Escala de Cores Dinâmica (Choropleth)
-        const valoresPopulacao = Object.values(populacaoPorEstado).map(d => d.populacao);
-        const minPop = d3.min(valoresPopulacao);
-        const maxPop = d3.max(valoresPopulacao);
-
-        const colorScale = d3.scaleSequential()
-            .domain([minPop, maxPop])
-            .interpolator(d3.interpolateBlues);
-
-        // 6. Desenhar os caminhos geométricos no SVG com a correção de chaves (id / codarea / CODAREA)
+    // 5. Carregar e renderizar o mapa fatiado
+    d3.json(urlMapaIbge).then(geojsonData => {
+        
         svg.append("g")
             .selectAll("path")
             .data(geojsonData.features)
@@ -108,27 +71,20 @@
             .attr("d", pathGenerator)
             .attr("class", "estado")
             .attr("fill", d => {
-                // Captura inteligente do código numérico enviado pelo IBGE
-                const codigoEstado = d.id || (d.properties && (d.properties.codarea || d.properties.CODAREA));
-                const chaveTratada = String(codigoEstado).trim();
-                const dadosEstaduais = populacaoPorEstado[chaveTratada];
+                // Captura a sigla do estado neste arquivo (ex: "SP", "RJ")
+                const siglaEstado = d.properties.sigla;
+                const dadosEstaduais = populacaoPorEstado[siglaEstado];
                 return dadosEstaduais ? colorScale(dadosEstaduais.populacao) : "#444";
             })
-            // 7. Eventos de Interatividade do Tooltip com chaves normalizadas
             .on("mouseover", (event, d) => {
-                const codigoEstado = d.id || (d.properties && (d.properties.codarea || d.properties.CODAREA));
-                const chaveTratada = String(codigoEstado).trim();
-                const dadosEstaduais = populacaoPorEstado[chaveTratada];
+                const siglaEstado = d.properties.sigla;
+                const dadosEstaduais = populacaoPorEstado[siglaEstado];
                 
-                let conteudoTooltip = "";
                 if (dadosEstaduais) {
                     const populacaoFormatada = dadosEstaduais.populacao.toLocaleString('pt-BR');
-                    conteudoTooltip = `<strong>${dadosEstaduais.nome}</strong><br/>População: ${populacaoFormatada} hab.`;
-                } else {
-                    conteudoTooltip = `<strong>Código: ${codigoEstado || 'Indefinido'}</strong><br/>Sem dados correspondentes.`;
+                    tooltip.style("opacity", 1)
+                           .html(`<strong>${dadosEstaduais.nome} (${siglaEstado})</strong><br/>População: ${populacaoFormatada} hab.`);
                 }
-
-                tooltip.style("opacity", 1).html(conteudoTooltip);
             })
             .on("mousemove", (event) => {
                 const [mouseX, mouseY] = d3.pointer(event, svg.node());
@@ -140,8 +96,6 @@
             });
 
     }).catch(error => {
-        console.error("Erro ao carregar ou processar os dados do IBGE:", error);
+        console.error("Erro ao carregar o mapa geométrico:", error);
     });
 </script>
-</body>
-</html>
