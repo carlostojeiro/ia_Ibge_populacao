@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aula Avançada D3.js: População Real do Censo IBGE</title>
+    <title>Aula Final: Automação Total com APIs do IBGE</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         body {
@@ -39,8 +39,8 @@
 </head>
 <body>
 
-    <h1>População do Brasil por Estado (Censo IBGE)</h1>
-    <p>Dados demográficos e malha geográfica consumidos em tempo real das APIs oficiais do Governo.</p>
+    <h1>População Dinâmica do Brasil (APIs IBGE)</h1>
+    <p>Aplicação 100% automatizada. Dados e geografia sincronizados em tempo real.</p>
 
     <div id="map-container">
         <div class="tooltip" id="tooltip"></div>
@@ -57,41 +57,10 @@
 
     const tooltip = d3.select("#tooltip");
 
-    // 1. URL CORRIGIDA: Esta traz os estados fatiados perfeitamente em GeoJSON
-    const urlMapaIbge = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson";
+    // 1. ENDPOINTS: Mapa fatiado por estados + Dados dinâmicos do Censo do Governo
+    const urlMapa = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson";
+    const urlDados = "https://servicodados.ibge.gov.br/api/v3/agregados/9514/periodos/2022/variaveis/93?localidades=N3[all]";
 
-    // 2. Dados Oficiais do Censo IBGE mapeados pelas SIGLAS correspondentes ao arquivo acima
-    const populacaoPorEstado = {
-        "AC": { nome: "Acre", populacao: 830018 },
-        "AL": { nome: "Alagoas", populacao: 3127682 },
-        "AM": { nome: "Amazonas", populacao: 3941613 },
-        "AP": { nome: "Amapá", populacao: 733759 },
-        "BA": { nome: "Bahia", populacao: 14141626 },
-        "CE": { nome: "Ceará", populacao: 8794957 },
-        "DF": { nome: "Distrito Federal", populacao: 2817381 },
-        "ES": { nome: "Espírito Santo", populacao: 3833712 },
-        "GO": { nome: "Goiás", populacao: 7056495 },
-        "MA": { nome: "Maranhão", populacao: 6776699 },
-        "MG": { nome: "Minas Gerais", populacao: 20539989 },
-        "MS": { nome: "Mato Grosso do Sul", populacao: 2757013 },
-        "MT": { nome: "Mato Grosso", populacao: 3658649 },
-        "PA": { nome: "Pará", populacao: 8121025 },
-        "PB": { nome: "Paraíba", populacao: 3974687 },
-        "PE": { nome: "Pernambuco", populacao: 9058931 },
-        "PI": { nome: "Piauí", populacao: 3272061 },
-        "PR": { nome: "Paraná", populacao: 11444380 },
-        "RJ": { nome: "Rio de Janeiro", populacao: 16055174 },
-        "RN": { nome: "Rio Grande do Norte", populacao: 3302729 },
-        "RO": { nome: "Rondônia", populacao: 1581196 },
-        "RR": { nome: "Roraima", populacao: 636707 },
-        "RS": { nome: "Rio Grande do Sul", populacao: 10882965 },
-        "SC": { nome: "Santa Catarina", populacao: 7610361 },
-        "SE": { nome: "Sergipe", populacao: 2209558 },
-        "SP": { nome: "São Paulo", populacao: 44411238 },
-        "TO": { nome: "Tocantins", populacao: 1511460 }
-    };
-
-    // 3. Projeção cartográfica centralizada
     const projection = d3.geoMercator()
         .center([-55, -15]) 
         .scale(850)         
@@ -99,18 +68,31 @@
 
     const pathGenerator = d3.geoPath().projection(projection);
 
-    // 4. Configuração das escalas de cores baseadas nos extremos reais
-    const valoresPopulacao = Object.values(populacaoPorEstado).map(d => d.populacao);
-    const minPop = d3.min(valoresPopulacao);
-    const maxPop = d3.max(valoresPopulacao);
+    // 2. Requisição Paralela Real
+    Promise.all([
+        d3.json(urlMapa),
+        d3.json(urlDados)
+    ]).then(([geojsonData, estatisticasIbge]) => {
 
-    const colorScale = d3.scaleSequential()
-        .domain([minPop, maxPop])
-        .interpolator(d3.interpolateBlues);
+        // 3. Mapeando os dados da API dinâmica usando o ID do estado (ex: "35" para SP)
+        const populacaoPorCodigo = {};
+        const resultadosBrutos = estatisticasIbge[0].resultados[0].series;
 
-    // 5. Carregar e renderizar o mapa fatiado
-    d3.json(urlMapaIbge).then(geojsonData => {
-        
+        resultadosBrutos.forEach(item => {
+            const codigoEstado = String(item.localidade.id).trim();
+            populacaoPorCodigo[codigoEstado] = {
+                nome: item.localidade.nome,
+                populacao: parseInt(item.serie["2022"])
+            };
+        });
+
+        // 4. Criação automática dos limites da escala de cor
+        const valores = Object.values(populacaoPorCodigo).map(d => d.populacao);
+        const colorScale = d3.scaleSequential()
+            .domain([d3.min(valores), d3.max(valores)])
+            .interpolator(d3.interpolateBlues);
+
+        // 5. Renderização do mapa cruzando chaves numéricas do IBGE
         svg.append("g")
             .selectAll("path")
             .data(geojsonData.features)
@@ -119,19 +101,19 @@
             .attr("d", pathGenerator)
             .attr("class", "estado")
             .attr("fill", d => {
-                // Captura a sigla do estado neste arquivo (ex: "SP", "RJ")
-                const siglaEstado = d.properties.sigla;
-                const dadosEstaduais = populacaoPorEstado[siglaEstado];
-                return dadosEstaduais ? colorScale(dadosEstaduais.populacao) : "#444";
+                // Esse arquivo de mapa guarda o código numérico em d.properties.id (ex: 35)
+                const codigoGeografico = String(d.properties.id).trim();
+                const dados = populacaoPorCodigo[codigoGeografico];
+                return dados ? colorScale(dados.populacao) : "#444";
             })
             .on("mouseover", (event, d) => {
-                const siglaEstado = d.properties.sigla;
-                const dadosEstaduais = populacaoPorEstado[siglaEstado];
+                const codigoGeografico = String(d.properties.id).trim();
+                const sigla = d.properties.sigla; // Pega a sigla "SP" para o layout
+                const dados = populacaoPorCodigo[codigoGeografico];
                 
-                if (dadosEstaduais) {
-                    const populacaoFormatada = dadosEstaduais.populacao.toLocaleString('pt-BR');
+                if (dados) {
                     tooltip.style("opacity", 1)
-                           .html(`<strong>${dadosEstaduais.nome} (${siglaEstado})</strong><br/>População: ${populacaoFormatada} hab.`);
+                           .html(`<strong>${dados.nome} (${sigla})</strong><br/>População: ${dados.populacao.toLocaleString('pt-BR')} hab.`);
                 }
             })
             .on("mousemove", (event) => {
@@ -144,7 +126,7 @@
             });
 
     }).catch(error => {
-        console.error("Erro ao carregar o mapa geométrico:", error);
+        console.error("Erro na sincronização das APIs:", error);
     });
 </script>
 </body>
