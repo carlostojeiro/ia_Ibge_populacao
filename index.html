@@ -1,3 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aula Avançada D3.js: População Real do Censo IBGE</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121214;
+            color: #e1e1e6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { margin-bottom: 5px; color: #00b37e; }
+        p { margin-top: 0; color: #8d8d99; }
+        #map-container { position: relative; background: #1c1c1f; border-radius: 8px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .estado { stroke: #121214; stroke-width: 1.2; cursor: pointer; transition: all 0.2s ease; }
+        .estado:hover { stroke: #fff; stroke-width: 2px; filter: brightness(1.2); }
+        .tooltip {
+            position: absolute;
+            background: rgba(32, 32, 36, 0.95);
+            border: 1px solid #00b37e;
+            padding: 10px;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 14px;
+            pointer-events: none;
+            opacity: 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            transition: opacity 0.15s ease;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>População do Brasil por Estado (Censo IBGE)</h1>
+    <p>Dados demográficos e malha geográfica consumidos em tempo real das APIs oficiais do Governo.</p>
+
+    <div id="map-container">
+        <div class="tooltip" id="tooltip"></div>
+    </div>
+
 <script>
     const width = 700;
     const height = 650;
@@ -99,3 +147,5 @@
         console.error("Erro ao carregar o mapa geométrico:", error);
     });
 </script>
+</body>
+</html>
