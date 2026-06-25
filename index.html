@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aula Avançada D3.js: População Real do Censo IBGE</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121214;
+            color: #e1e1e6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { margin-bottom: 5px; color: #00b37e; }
+        p { margin-top: 0; color: #8d8d99; }
+        #map-container { position: relative; background: #1c1c1f; border-radius: 8px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .estado { stroke: #121214; stroke-width: 1.2; cursor: pointer; transition: all 0.2s ease; }
+        .estado:hover { stroke: #fff; stroke-width: 2px; filter: brightness(1.2); }
+        .tooltip {
+            position: absolute;
+            background: rgba(32, 32, 36, 0.95);
+            border: 1px solid #00b37e;
+            padding: 10px;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 14px;
+            pointer-events: none;
+            opacity: 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            transition: opacity 0.15s ease;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>População do Brasil por Estado (Censo IBGE)</h1>
+    <p>Dados demográficos e malha geográfica consumidos em tempo real das APIs oficiais do Governo.</p>
+
+    <div id="map-container">
+        <div class="tooltip" id="tooltip"></div>
+    </div>
+
+<script>
+    const width = 700;
+    const height = 650;
+
+    const svg = d3.select("#map-container")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+    const tooltip = d3.select("#tooltip");
+
+    // 1. Configuração das URLs das duas APIs oficiais do IBGE
+    const urlMapaIbge = "https://servicodados.ibge.gov.br/api/v3/malhas/paises/BR?qualidade=maxima&intregra=estados&formato=application/vnd.geo+json";
+    const urlDadosIbge = "https://servicodados.ibge.gov.br/api/v3/agregados/9514/periodos/2022/variaveis/93?localidades=N3[all]";
+
+    // 2. Projeção cartográfica do mapa
+    const projection = d3.geoMercator()
+        .center([-55, -15]) 
+        .scale(850)         
+        .translate([width / 2, height / 2]);
+
+    const pathGenerator = d3.geoPath().projection(projection);
+
+    // 3. ENGENHARIA DE DADOS NA AULA: Carregar as duas APIs ao mesmo tempo usando Promise.all
+    Promise.all([
+        d3.json(urlMapaIbge),
+        d3.json(urlDadosIbge)
+    ]).then(([geojsonData, estatisticasIbge]) => {
+
+        // 4. Tratamento dos dados brutos do IBGE para um formato fácil de ler (Dicionário JavaScript)
+        // A API do SIDRA traz uma estrutura de array aninhada profunda. Vamos limpá-la:
+        const populacaoPorEstado = {};
+        const resultadosBrutos = estatisticasIbge[0].resultados[0].series;
+
+        resultadosBrutos.forEach(item => {
+            const codigoEstado = item.localidade.id;
+            const nomeEstado = item.localidade.nome;
+            const populacao = parseInt(item.serie["2022"]); // Pega o valor do Censo 2022
+            
+            populacaoPorEstado[codigoEstado] = {
+                nome: nomeEstado,
+                populacao: populacao
+            };
+        });
+
+        // 5. Criação de uma Escala de Cores Dinâmica (Choropleth) baseada nos extremos reais
+        // Descobre automaticamente qual o estado menos populoso e o mais populoso para criar o gradiente
+        const valoresPopulação = Object.values(populacaoPorEstado).map(d => d.populacao);
+        const minPop = d3.min(valoresPopulação);
+        const maxPop = d3.max(valoresPopulação);
+
+        const colorScale = d3.scaleSequential()
+            .domain([minPop, maxPop])
+            .interpolator(d3.interpolateBlues); // Tons de azul (quanto mais escuro, mais populoso)
+
+        // 6. Desenhar os caminhos geométricos no SVG
+        svg.append("g")
+            .selectAll("path")
+            .data(geojsonData.features)
+            .enter()
+            .append("path")
+            .attr("d", pathGenerator)
+            .attr("class", "estado")
+            .attr("fill", d => {
+                const codigoEstado = d.properties.codarea; 
+                const dadosEstaduias = populacaoPorEstado[codigoEstado];
+                return dadosEstaduias ? colorScale(dadosEstaduias.populacao) : "#444";
+            })
+            // 7. Eventos de Interatividade do Tooltip
+            .on("mouseover", (event, d) => {
+                const codigoEstado = d.properties.codarea;
+                const dadosEstaduias = populacaoPorEstado[codigoEstado];
+                
+                const nome = dadosEstaduias ? dadosEstaduias.nome : "Desconhecido";
+                // Formata o número com separador de milhar brasileiro (ex: 44.420.459)
+                const populacaoFormatada = dadosEstaduias ? dadosEstaduias.populacao.toLocaleString('pt-BR') : "Sem dados";
+
+                tooltip.style("opacity", 1)
+                       .html(`<strong>${nome}</strong><br/>População: ${populacaoFormatada} hab.`);
+            })
+            .on("mousemove", (event) => {
+                const [mouseX, mouseY] = d3.pointer(event, svg.node());
+                tooltip.style("left", (mouseX + 20) + "px")
+                       .style("top", (mouseY) + "px");
+            })
+            .on("mouseleave", () => {
+                tooltip.style("opacity", 0);
+            });
+
+    }).catch(error => {
+        console.error("Erro ao carregar ou processar os dados do IBGE:", error);
+    });
+</script>
+</body>
+</html>
